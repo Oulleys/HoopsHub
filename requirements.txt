@@ -1,0 +1,7 @@
+pandas==1.5.3             # For data manipulation
+numpy==1.23.5             # For numerical operations
+scikit-learn==1.2.1       # For model training and evaluation
+xgboost==1.7.5            # If used for alternative modeling
+streamlit==1.25.0         # For the web app
+requests==2.31.0          # For API calls
+matplotlib==3.7.1         # Optional: For visualization (if needed)
