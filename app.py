@@ -67,8 +67,44 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Sidebar for navigation
-app_mode = st.sidebar.radio("Select an option", ["Head-to-Head Predictor", "Parlay Creator", "NBA News"], key="app_mode_radio")
+app_mode = st.sidebar.radio("Select an option", ["Home", "Head-to-Head Predictor", "Parlay Creator", "NBA News"], key="app_mode_radio")
 
+
+# Main page
+def main_page():
+    st.title("Welcome to HoopsHub Analytics")
+
+    # App description
+    st.subheader("What HoopsHub Analytics Does")
+    st.write("""
+    **HoopsHub Analytics** is a dynamic sports analytics platform for NBA enthusiasts. 
+    The app provides several features including:
+
+    - **Head-to-Head Game Prediction**: Predict the outcome of games between selected NBA teams.
+    - **Parlay Creator**: Create your own parlays and calculate potential odds and payouts.
+    - **NBA News and Injury Updates**: Get the latest news and injury updates for NBA players.
+
+    Whether you're a fan, a bettor, or just someone looking to understand the game better, HoopsHub Analytics will help you gain insightful data-driven predictions.
+
+    **Please Note**: This app is still in progress and more features will be added soon! 
+    Your feedback is highly appreciated!
+    """)
+
+    # Add a footer message for users
+    st.markdown("---")
+    st.write("Developed by **Oulleys** | HoopsHub Analytics - All Rights Reserved")
+
+if app_mode == "Home":
+    main_page()  # Show the home page by default
+elif app_mode == "Head-to-Head Predictor":
+    # Call the function for Head-to-Head Predictor section
+    pass
+elif app_mode == "Parlay Creator":
+    # Call the function for Parlay Creator section
+    pass
+elif app_mode == "NBA News":
+    # Call the function for NBA News section
+    pass
 
 # Fetch all NBA teams
 nba_teams = teams.get_teams()
