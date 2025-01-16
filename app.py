@@ -184,189 +184,405 @@ def display_injury_report(team_name):
 
 # Head-to-Head Predictor Section
 if app_mode == "Head-to-Head Predictor":
-    st.markdown('<div class="main-header">NBA Head-to-Head Game Predictor</div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-header">🏀 <strong>NBA Head-to-Head Game Predictor</strong></div>',
+                unsafe_allow_html=True)
 
-    # Team Selection for Head-to-Head
-    team_1_name = st.selectbox("Select Team 1", list(team_choices.keys()), key="team_1")
-    team_2_name = st.selectbox("Select Team 2", list(team_choices.keys()), key="team_2")
+    # Team Selection
+    st.markdown('<h4>Select Teams:</h4>', unsafe_allow_html=True)
+    col1, col2 = st.columns(2)
+    with col1:
+        team_1_name = st.selectbox("Team 1", list(team_choices.keys()), key="team_1")
+    with col2:
+        # Exclude Team 1 from Team 2 options
+        available_teams_for_team_2 = [team for team in list(team_choices.keys()) if team != team_1_name]
+        team_2_name = st.selectbox("Team 2", available_teams_for_team_2, key="team_2")
 
-    if team_1_name == team_2_name:
-        st.error("Both teams cannot be the same. Please select two different teams.")
-        st.stop()
+    st.session_state['head_to_head_teams'] = {'team_1': team_1_name, 'team_2': team_2_name}
 
-    st.session_state['head_to_head_teams']['team_1'] = team_1_name
-    st.session_state['head_to_head_teams']['team_2'] = team_2_name
+    # Home/Away Settings
+    st.markdown('<h4>Home/Away Settings:</h4>', unsafe_allow_html=True)
 
-    team_1_home = st.radio(f"Is {team_1_name} playing at Home or Away?", ['Home', 'Away'], key="team_1_home")
-    team_2_home = st.radio(f"Is {team_2_name} playing at Home or Away?", ['Home', 'Away'], key="team_2_home")
+    # Columns for layout
+    col_home_away, col_display_status = st.columns([3, 1])
 
-    # Validate if both teams are not selected as Home or Away
-    if team_1_home == team_2_home:
-        st.error("Both teams cannot be at the same location (Home or Away). Please select different options.")
-        st.stop()  # Stops execution and forces user to correct the selection
+    # Radio button for selecting home/away
+    with col_home_away:
+        team_1_home = st.radio(
+            f"Where is {team_1_name} playing?",
+            options=['Home', 'Away'],
+            key="team_1_home",
+            help="Select whether Team 1 is playing at home or away."
+        )
 
-    team_1_home_value = 1 if team_1_home == "Home" else 0
-    team_2_home_value = 1 if team_2_home == "Home" else 0
+    # Dynamically display the opposite setting for Team 2
+    with col_display_status:
+        team_2_home = "Away" if team_1_home == "Home" else "Home"
+        st.markdown(
+            f"<div style='text-align:center; font-size:16px; font-weight:bold;'>"
+            f"<span style='color:#FF5733;'>{team_2_name}</span> is playing "
+            f"<span style='color:#28A745;'>{team_2_home}</span>"
+            f"</div>",
+            unsafe_allow_html=True
+        )
 
-    # Display injury report for both teams
-    st.subheader(f"Injury Report for {team_1_name}")
-    display_injury_report(team_1_name)
+    # Fetch Injury Reports
+    st.markdown('<h4>Injury Reports:</h4>', unsafe_allow_html=True)
 
-    st.subheader(f"Injury Report for {team_2_name}")
-    display_injury_report(team_2_name)
 
-    if st.button("Fetch Head-to-Head Stats", key="fetch_button", help="Click to fetch stats and make predictions",
-                 use_container_width=True):
-        team_1_id = team_choices[team_1_name]
-        team_2_id = team_choices[team_2_name]
+    def display_injury_safe(team_name):
+        """Display injury reports and handle errors."""
+        try:
+            display_injury_report(team_name)
+        except Exception as e:
+            st.error(f"Could not fetch injury report for {team_name}: {e}")
 
-        team_1_game_log = TeamGameLog(team_id=team_1_id).get_data_frames()[0]
-        team_2_game_log = TeamGameLog(team_id=team_2_id).get_data_frames()[0]
 
-        team_1_avg_stats = {
-            'fg%': team_1_game_log['FG_PCT'].mean(),
-            '3p%': team_1_game_log['FG3_PCT'].mean(),
-            'ft': team_1_game_log['FTM'].mean(),
-            'tov%': team_1_game_log['TOV'].mean(),
-            'ortg_max': team_1_game_log['PTS'].mean(),
-            'drtg_max': team_1_game_log['REB'].mean(),
-            'home': team_1_home_value
-        }
+    st.markdown(f"<div><strong>{team_1_name}:</strong></div>", unsafe_allow_html=True)
+    display_injury_safe(team_1_name)
 
-        team_2_avg_stats = {
-            'fg%': team_2_game_log['FG_PCT'].mean(),
-            '3p%': team_2_game_log['FG3_PCT'].mean(),
-            'ft': team_2_game_log['FTM'].mean(),
-            'tov%': team_2_game_log['TOV'].mean(),
-            'ortg_max': team_2_game_log['PTS'].mean(),
-            'drtg_max': team_2_game_log['REB'].mean(),
-            'home': team_2_home_value
-        }
+    st.markdown(f"<div><strong>{team_2_name}:</strong></div>", unsafe_allow_html=True)
+    display_injury_safe(team_2_name)
 
-        # Adjust for injuries
-        team_1_avg_stats = adjust_for_injuries(team_1_name, team_1_avg_stats)
-        team_2_avg_stats = adjust_for_injuries(team_2_name, team_2_avg_stats)
+    # Fetch Stats Button
+    st.markdown('<div style="text-align:center; margin-top:20px;">', unsafe_allow_html=True)
+    if st.button("📊 Fetch Head-to-Head Stats", key="fetch_button", help="Click to fetch stats and make predictions"):
+        try:
+            team_1_id = team_choices[team_1_name]
+            team_2_id = team_choices[team_2_name]
 
-        st.write(f"**Team 1 ({team_1_name}) Stats:**", team_1_avg_stats)
-        st.write(f"**Team 2 ({team_2_name}) Stats:**", team_2_avg_stats)
 
-        team_1_input = pd.DataFrame([[team_1_avg_stats['fg%'], team_1_avg_stats['3p%'], team_1_avg_stats['ft'],
-                                      team_1_avg_stats['tov%'], team_1_avg_stats['ortg_max'],
-                                      team_1_avg_stats['drtg_max'], team_1_avg_stats['home']]],
+            # Retrieve game logs for both teams
+            def fetch_game_logs(team_id):
+                """Fetch game logs for a team."""
+                return TeamGameLog(team_id=team_id).get_data_frames()[0]
+
+
+            team_1_game_log = fetch_game_logs(team_1_id)
+            team_2_game_log = fetch_game_logs(team_2_id)
+
+
+            # Calculate average stats for both teams
+            def calculate_avg_stats(game_log, home_status):
+                """Calculate average statistics."""
+                return {
+                    'fg%': game_log['FG_PCT'].mean(),
+                    '3p%': game_log['FG3_PCT'].mean(),
+                    'ft': game_log['FTM'].mean(),
+                    'tov%': game_log['TOV'].mean(),
+                    'ortg_max': game_log['PTS'].mean(),
+                    'drtg_max': game_log['REB'].mean(),
+                    'home': 1 if home_status == "Home" else 0
+                }
+
+
+            team_1_avg_stats = calculate_avg_stats(team_1_game_log, team_1_home)
+            team_2_avg_stats = calculate_avg_stats(team_2_game_log, team_2_home)
+
+            # Adjust stats for injuries
+            team_1_avg_stats = adjust_for_injuries(team_1_name, team_1_avg_stats)
+            team_2_avg_stats = adjust_for_injuries(team_2_name, team_2_avg_stats)
+
+            # Display stats
+            st.write(f"**Team 1 ({team_1_name}) Stats:**", team_1_avg_stats)
+            st.write(f"**Team 2 ({team_2_name}) Stats:**", team_2_avg_stats)
+
+
+            # Prepare input for prediction model
+            def prepare_input(avg_stats):
+                return pd.DataFrame([[avg_stats['fg%'], avg_stats['3p%'], avg_stats['ft'], avg_stats['tov%'],
+                                      avg_stats['ortg_max'], avg_stats['drtg_max'], avg_stats['home']]],
                                     columns=['fg%', '3p%', 'ft', 'tov%', 'ortg_max', 'drtg_max', 'home'])
 
-        team_2_input = pd.DataFrame([[team_2_avg_stats['fg%'], team_2_avg_stats['3p%'], team_2_avg_stats['ft'],
-                                      team_2_avg_stats['tov%'], team_2_avg_stats['ortg_max'],
-                                      team_2_avg_stats['drtg_max'], team_2_avg_stats['home']]],
-                                    columns=['fg%', '3p%', 'ft', 'tov%', 'ortg_max', 'drtg_max', 'home'])
 
-        team_1_proba = model.predict_proba(team_1_input)[0][1]
-        team_2_proba = model.predict_proba(team_2_input)[0][1]
+            team_1_input = prepare_input(team_1_avg_stats)
+            team_2_input = prepare_input(team_2_avg_stats)
 
-        st.write(f"**Team 1 ({team_1_name}) Win Probability:** {team_1_proba:.2f}")
-        st.write(f"**Team 2 ({team_2_name}) Win Probability:** {team_2_proba:.2f}")
+            # Predict win probabilities
+            team_1_proba = model.predict_proba(team_1_input)[0][1]
+            team_2_proba = model.predict_proba(team_2_input)[0][1]
 
-        if team_1_proba > team_2_proba:
-            st.success(f"Prediction: {team_1_name} is more likely to win!")
-        elif team_2_proba > team_1_proba:
-            st.success(f"Prediction: {team_2_name} is more likely to win!")
-        else:
-            st.warning("Prediction: It's too close to call. Both teams are evenly matched!")
+            # Display predictions
+            st.write(f"**Team 1 ({team_1_name}) Win Probability:** {team_1_proba:.2f}")
+            st.write(f"**Team 2 ({team_2_name}) Win Probability:** {team_2_proba:.2f}")
+
+            if team_1_proba > team_2_proba:
+                st.success(f"Prediction: {team_1_name} is more likely to win!")
+            elif team_2_proba > team_1_proba:
+                st.success(f"Prediction: {team_2_name} is more likely to win!")
+            else:
+                st.warning("Prediction: It's too close to call. Both teams are evenly matched!")
+
+        except Exception as e:
+            st.error(f"An error occurred during data processing: {e}")
+
+    st.markdown('</div>', unsafe_allow_html=True)
 
 # Parlay Creator Section
 elif app_mode == "Parlay Creator":
-    st.title("NBA In-Game Parlay Creator")
+    st.title("🏀 NBA In-Game Parlay Creator")
 
-    available_teams = [
-        "Atlanta Hawks", "Boston Celtics", "Brooklyn Nets", "Charlotte Hornets", "Chicago Bulls",
-        "Cleveland Cavaliers", "Dallas Mavericks", "Denver Nuggets", "Detroit Pistons", "Golden State Warriors",
-        "Houston Rockets", "Indiana Pacers", "Los Angeles Clippers", "Los Angeles Lakers", "Memphis Grizzlies",
-        "Miami Heat", "Milwaukee Bucks", "Minnesota Timberwolves", "New Orleans Pelicans", "New York Knicks",
-        "Oklahoma City Thunder", "Orlando Magic", "Philadelphia 76ers", "Phoenix Suns", "Portland Trail Blazers",
-        "Sacramento Kings", "San Antonio Spurs", "Toronto Raptors", "Utah Jazz", "Washington Wizards"
-    ]
+    team_logos = {
+        "Atlanta Hawks": "https://a.espncdn.com/i/teamlogos/nba/500/atl.png",
+        "Boston Celtics": "https://a.espncdn.com/i/teamlogos/nba/500/bos.png",
+        "Brooklyn Nets": "https://a.espncdn.com/i/teamlogos/nba/500/bkn.png",
+        "Charlotte Hornets": "https://a.espncdn.com/i/teamlogos/nba/500/cha.png",
+        "Chicago Bulls": "https://a.espncdn.com/i/teamlogos/nba/500/chi.png",
+        "Cleveland Cavaliers": "https://a.espncdn.com/i/teamlogos/nba/500/cle.png",
+        "Dallas Mavericks": "https://a.espncdn.com/i/teamlogos/nba/500/dal.png",
+        "Denver Nuggets": "https://a.espncdn.com/i/teamlogos/nba/500/den.png",
+        "Detroit Pistons": "https://a.espncdn.com/i/teamlogos/nba/500/det.png",
+        "Golden State Warriors": "https://a.espncdn.com/i/teamlogos/nba/500/gsw.png",
+        "Houston Rockets": "https://a.espncdn.com/i/teamlogos/nba/500/hou.png",
+        "Indiana Pacers": "https://a.espncdn.com/i/teamlogos/nba/500/ind.png",
+        "Los Angeles Clippers": "https://a.espncdn.com/i/teamlogos/nba/500/lac.png",
+        "Los Angeles Lakers": "https://a.espncdn.com/i/teamlogos/nba/500/lal.png",
+        "Memphis Grizzlies": "https://a.espncdn.com/i/teamlogos/nba/500/mem.png",
+        "Miami Heat": "https://a.espncdn.com/i/teamlogos/nba/500/mia.png",
+        "Milwaukee Bucks": "https://a.espncdn.com/i/teamlogos/nba/500/mil.png",
+        "Minnesota Timberwolves": "https://a.espncdn.com/i/teamlogos/nba/500/min.png",
+        "New Orleans Pelicans": "https://a.espncdn.com/i/teamlogos/nba/500/no.png",
+        "New York Knicks": "https://a.espncdn.com/i/teamlogos/nba/500/nyk.png",
+        "Oklahoma City Thunder": "https://a.espncdn.com/i/teamlogos/nba/500/okc.png",
+        "Orlando Magic": "https://a.espncdn.com/i/teamlogos/nba/500/orl.png",
+        "Philadelphia 76ers": "https://a.espncdn.com/i/teamlogos/nba/500/phi.png",
+        "Phoenix Suns": "https://a.espncdn.com/i/teamlogos/nba/500/phx.png",
+        "Portland Trail Blazers": "https://a.espncdn.com/i/teamlogos/nba/500/por.png",
+        "Sacramento Kings": "https://a.espncdn.com/i/teamlogos/nba/500/sac.png",
+        "San Antonio Spurs": "https://a.espncdn.com/i/teamlogos/nba/500/sas.png",
+        "Toronto Raptors": "https://a.espncdn.com/i/teamlogos/nba/500/tor.png",
+        "Utah Jazz": "https://a.espncdn.com/i/teamlogos/nba/500/uta.png",
+        "Washington Wizards": "https://a.espncdn.com/i/teamlogos/nba/500/was.png"
+    }
 
-    # Team selection for Parlay
-    team_1 = st.selectbox("Select Team 1 for Parlay", available_teams,
-                          index=available_teams.index(st.session_state['parlay_teams']['team_1']) if
-                          st.session_state['parlay_teams']['team_1'] else 0)
-    team_2 = st.selectbox("Select Team 2 for Parlay", available_teams,
-                          index=available_teams.index(st.session_state['parlay_teams']['team_2']) if
-                          st.session_state['parlay_teams']['team_2'] else 0)
-
-    # Update session state when team selection changes
-    st.session_state['parlay_teams']['team_1'] = team_1
-    st.session_state['parlay_teams']['team_2'] = team_2
-
-    # Moneyline winner selection
-    moneyline_winner = st.radio("Pick the team to win the game", [team_1, team_2], key="moneyline_winner")
-
-    # Spread selection (User will select spread for each team)
-    spread_team_1 = st.number_input(f"Enter spread for {team_1}", value=6.0, key=f"spread_team_1")
-
-    # Automatically calculate spread for Team 2 as the opposite of Team 1's spread
-    spread_team_2 = -spread_team_1  # Opposite spread for Team 2
-
-    # Display spreads for both teams
-    st.write(f"Spread for {team_1}: {spread_team_1}")
-    st.write(f"Spread for {team_2}: {spread_team_2} (Automatically adjusted)")
-
-    # Parlay input fields for odds
-    moneyline_team_1 = st.number_input(f"Moneyline Odds for {team_1}", value=110.0, key=f"moneyline_team_1")
-    moneyline_team_2 = st.number_input(f"Moneyline Odds for {team_2}", value=-130.0, key=f"moneyline_team_2")
-    spread_team_1_odds = st.number_input(f"Odds for {team_1} to cover spread", value=1.5, key=f"spread_team_1_odds")
-    spread_team_2_odds = st.number_input(f"Odds for {team_2} to cover spread", value=1.5, key=f"spread_team_2_odds")
-
-    over_under = st.radio("Over/Under", ("Over", "Under"), key=f"over_under_{team_1}_{team_2}")
-    total_points = st.number_input("Enter Total Points", value=220, key="total_points")
-    over_under_odds = st.number_input(f"Odds for {over_under} {total_points} points", value=1.8, key="over_under_odds")
-
-    # Total number of odds
-    odds_list = [moneyline_team_1, moneyline_team_2, spread_team_1_odds, spread_team_2_odds]
+    placeholder_logo = "https://via.placeholder.com/50?text=No+Logo"
 
 
-    # Function to calculate combined parlay odds
+    def normalize_team_name(team_name):
+        return team_name.strip().title()
+
+
+    @st.cache_data
+    def fetch_odds_from_oddsapi():
+        api_key = "86b5432485ce9d1cda72802f8cb8c17f"
+        url = f"https://api.the-odds-api.com/v4/sports/basketball_nba/odds"
+        params = {
+            "apiKey": api_key,
+            "regions": "us",
+            "markets": "h2h,spreads,totals",
+            "oddsFormat": "american"
+        }
+        response = requests.get(url, params=params)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Failed to fetch odds: {response.status_code} - {response.json().get('message', '')}")
+            return None
+
+
+    def parse_odds_data(odds_data):
+        games = []
+        for game in odds_data:
+            game_data = {
+                "game_id": game["id"],
+                "home_team": game["home_team"],
+                "away_team": game["away_team"],
+                "moneyline_home": None,
+                "moneyline_away": None,
+                "spread_home": None,
+                "spread_away": None,
+                "spread_home_odds": None,
+                "spread_away_odds": None,
+                "over_under": None,
+                "over_odds": None,
+                "under_odds": None
+            }
+            for bookmaker in game["bookmakers"]:
+                if bookmaker["key"] == "draftkings":  # Use DraftKings-specific odds
+                    for market in bookmaker["markets"]:
+                        if market["key"] == "h2h":  # Moneyline
+                            game_data["moneyline_home"] = market["outcomes"][0]["price"]
+                            game_data["moneyline_away"] = market["outcomes"][1]["price"]
+                        elif market["key"] == "spreads":  # Spread
+                            game_data["spread_home"] = market["outcomes"][0]["point"]
+                            game_data["spread_away"] = market["outcomes"][1]["point"]
+                            game_data["spread_home_odds"] = market["outcomes"][0]["price"]  # Spread home odds
+                            game_data["spread_away_odds"] = market["outcomes"][1]["price"]  # Spread away odds
+                        elif market["key"] == "totals":  # Over/Under
+                            game_data["over_under"] = market["outcomes"][0]["point"]
+                            game_data["over_odds"] = market["outcomes"][0]["price"]  # Odds for Over
+                            game_data["under_odds"] = market["outcomes"][1]["price"]  # Odds for Under
+            games.append(game_data)
+        return games
+
+
     def calculate_parlay_odds(odds_list):
-        combined_odds = 1
+        decimal_odds_list = []
         for odds in odds_list:
-            if odds > 0:  # Positive odds
-                combined_odds *= (1 + (odds / 100))  # Convert to decimal odds
-            else:  # Negative odds
-                combined_odds *= (1 + (100 / abs(odds)))  # Convert negative odds to decimal odds
-        return (combined_odds - 1) * 100  # Convert decimal odds back to American odds
+            if odds > 0:
+                decimal_odds = 1 + (odds / 100)
+            else:
+                decimal_odds = 1 + (100 / abs(odds))
+            decimal_odds_list.append(decimal_odds)
+
+        combined_decimal_odds = 1
+        for decimal_odd in decimal_odds_list:
+            combined_decimal_odds *= decimal_odd
+
+        if combined_decimal_odds >= 2:
+            parlay_odds = (combined_decimal_odds - 1) * 100
+        else:
+            parlay_odds = -100 / (combined_decimal_odds - 1)
+
+        return round(parlay_odds)
 
 
-    # Function to calculate payout
-    def calculate_payout(odds, stake):
-        if odds > 0:  # Positive odds
-            payout = stake * (1 + (odds / 100))  # Profit from positive odds
-        else:  # Negative odds
-            payout = stake * (1 + (100 / abs(odds)))  # Profit from negative odds
-        return payout
+    def calculate_payout(parlay_odds, stake):
+        if parlay_odds > 0:
+            return round(stake * (1 + (parlay_odds / 100)), 2)
+        else:
+            return round(stake * (1 + (100 / abs(parlay_odds))), 2)
 
 
-    # User input for stake amount
-    stake_amount = st.number_input("Enter your stake amount (in CAD)", value=10.0)
+    if "bet_slip" not in st.session_state:
+        st.session_state.bet_slip = []
 
-    # Calculate parlay odds and potential payout
-    parlay_odds = calculate_parlay_odds(odds_list)
-    potential_payout = calculate_payout(parlay_odds, stake_amount)
 
-    # Styling section
-    st.markdown("---")  # Horizontal line separator for neatness
+    def add_bet_to_slip(game_name, bet_type, team_or_pick, odds):
+        for bet in st.session_state.bet_slip:
+            if bet["Game"] == game_name:
+                for sub_bet in bet["Bets"]:
+                    # Restrict betting on both teams in the same market
+                    if sub_bet["Type"] == bet_type and sub_bet["Team/Pick"] != team_or_pick:
+                        st.warning(f"You cannot bet on both teams for {bet_type} in the same game.")
+                        return  # Stop adding the bet if there's a conflict
 
-    # Display the results with enhanced styling
-    if st.button("Calculate Parlay Odds"):
-        # Display Parlay Odds
-        st.markdown(f"### Parlay Odds for {team_1} vs {team_2}:")
-        st.markdown(f"**+{round(parlay_odds)}**")  # Format the odds as a positive number
+                    # Restrict placing the same bet repeatedly
+                    if sub_bet["Type"] == bet_type and sub_bet["Team/Pick"] == team_or_pick and sub_bet["Odds"] == odds:
+                        st.warning(f"You have already placed a {bet_type} bet on {team_or_pick} with odds {odds}.")
+                        return  # Stop adding duplicate bet
 
-        # Display Potential Payout
-        st.markdown(f"### Potential Payout for ${stake_amount} CAD:")
-        st.markdown(f"**${round(potential_payout, 2)} CAD**")  # Display the payout with two decimal places
+                # Add the new bet to the existing game (no conflicts or duplicates found)
+                bet["Bets"].append({"Type": bet_type, "Team/Pick": team_or_pick, "Odds": odds})
+                return
 
-        # Optional: Add some final message or good luck message
-        st.markdown("#### Good luck with your bet!")
+        # If the game is not yet in the bet slip, add it as a new entry
+        st.session_state.bet_slip.append({
+            "Game": game_name,
+            "Bets": [{"Type": bet_type, "Team/Pick": team_or_pick, "Odds": odds}]
+        })
+
+
+    def remove_bet_from_slip(game_name, bet_index):
+        for bet in st.session_state.bet_slip:
+            if bet["Game"] == game_name:
+                del bet["Bets"][bet_index]
+                # Check if there are any bets left in this game, if not, remove the game entirely
+                if len(bet["Bets"]) == 0:
+                    st.session_state.bet_slip.remove(bet)
+                return
+
+
+    odds_data = fetch_odds_from_oddsapi()
+    if not odds_data:
+        st.error("No games available.")
+        st.stop()
+
+    games = parse_odds_data(odds_data)
+
+    if games:
+        st.markdown("### Upcoming Games")
+        for game in games:
+            with st.container():
+                st.markdown("---")
+                col_logo1, col_text, col_logo2 = st.columns([1, 4, 1])
+                home_team = normalize_team_name(game["home_team"])
+                away_team = normalize_team_name(game["away_team"])
+                home_logo = team_logos.get(home_team, placeholder_logo)
+                away_logo = team_logos.get(away_team, placeholder_logo)
+
+                with col_logo1:
+                    st.image(home_logo, width=50)
+                with col_text:
+                    st.markdown(f"### {home_team} vs {away_team}")
+                with col_logo2:
+                    st.image(away_logo, width=50)
+
+                col1, col2, col3 = st.columns(3)
+
+                if "selected_team" not in st.session_state:
+                    st.session_state.selected_team = None
+
+                with col1:
+                    st.markdown("**Moneyline**")
+                    if game.get("moneyline_home"):
+                        if st.button(f"{home_team}: {game['moneyline_home']}", key=f"ml_home_{game['game_id']}"):
+                            add_bet_to_slip(f"{home_team} vs {away_team}", "Moneyline", home_team,
+                                            game["moneyline_home"])
+
+                    if game.get("moneyline_away"):
+                        if st.button(f"{away_team}: {game['moneyline_away']}", key=f"ml_away_{game['game_id']}"):
+                            add_bet_to_slip(f"{home_team} vs {away_team}", "Moneyline", away_team,
+                                            game["moneyline_away"])
+
+                with col2:
+                    st.markdown("**Spread**")
+                    if game.get("spread_home"):
+                        if st.button(f"{home_team}: {game['spread_home']} ({game['spread_home_odds']})",
+                                     key=f"spread_home_{game['game_id']}"):
+                            add_bet_to_slip(f"{home_team} vs {away_team}", "Spread", home_team,
+                                            game["spread_home_odds"])
+
+                    if game.get("spread_away"):
+                        if st.button(f"{away_team}: {game['spread_away']} ({game['spread_away_odds']})",
+                                     key=f"spread_away_{game['game_id']}"):
+                            add_bet_to_slip(f"{home_team} vs {away_team}", "Spread", away_team,
+                                            game["spread_away_odds"])
+
+                with col3:
+                    st.markdown("**Totals (Over/Under)**")
+                    if game.get("over_odds"):
+                        if st.button(f"Over {game['over_under']} ({game['over_odds']})", key=f"over_{game['game_id']}"):
+                            add_bet_to_slip(f"{home_team} vs {away_team}", "Total", "Over", game["over_odds"])
+
+                    if game.get("under_odds"):
+                        if st.button(f"Under {game['over_under']} ({game['under_odds']})",
+                                     key=f"under_{game['game_id']}"):
+                            add_bet_to_slip(f"{home_team} vs {away_team}", "Total", "Under", game["under_odds"])
+
+        st.sidebar.title("📝 Bet Slip")
+        bet_slip = st.session_state.bet_slip
+        if bet_slip:
+            st.sidebar.markdown("### Your Bets")
+            total_odds = []
+            for i, bet in enumerate(bet_slip):
+                st.sidebar.markdown(f"**{bet['Game']}**")
+                for j, sub_bet in enumerate(bet["Bets"]):
+                    st.sidebar.markdown(f"- **Type:** {sub_bet['Type']}")
+                    st.sidebar.markdown(f"- **Team/Pick:** {sub_bet['Team/Pick']}")
+                    st.sidebar.markdown(f"- **Odds:** {sub_bet['Odds']}")
+                    total_odds.append(sub_bet["Odds"])
+
+                    # Add a remove button for each individual bet
+                    if st.sidebar.button(f"Remove {sub_bet['Type']} {sub_bet['Team/Pick']}", key=f"remove_bet_{i}_{j}"):
+                        remove_bet_from_slip(bet["Game"], j)
+                        # Force a re-run of the script (which refreshes the UI)
+                        st.experimental_rerun()
+                        break  # Stop further code execution as we've already updated the state
+
+                if st.sidebar.button(f"Remove {bet['Game']}", key=f"remove_{i}"):
+                    st.session_state.bet_slip.pop(i)
+                    st.experimental_rerun()  # Force the UI to refresh
+                    break
+
+            # Calculate corrected parlay odds and potential payout
+            parlay_odds = calculate_parlay_odds(total_odds)
+            stake_amount = st.sidebar.number_input("Enter your stake amount (in CAD):", value=10.0)
+            potential_payout = calculate_payout(parlay_odds, stake_amount)
+
+            st.sidebar.markdown(f"### Parlay Odds: **{parlay_odds:+}**")
+            st.sidebar.markdown(f"### Potential Payout: **${potential_payout} CAD**")
+        else:
+            st.sidebar.markdown("No bets added yet. Start selecting bets!")
 
 # NBA News Section
 elif app_mode == "NBA News":
@@ -507,7 +723,6 @@ def process_games_data(games):
             })
 
     return pd.DataFrame(upcoming_games), pd.DataFrame(live_games)
-
 
 #App modes
 
