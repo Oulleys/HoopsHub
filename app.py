@@ -109,6 +109,64 @@ elif app_mode == "NBA News":
 # Fetch all NBA teams
 nba_teams = teams.get_teams()
 team_choices = {team['full_name']: team['id'] for team in nba_teams}
+team_choices = dict(sorted(team_choices.items()))
+
+# Define function to get NBA injury reports
+def get_nba_injuries():
+    url = "https://api.sportsdata.io/v3/nba/scores/json/Injuries"
+    headers = {
+        "Ocp-Apim-Subscription-Key": "c00bcbe68d8345feaf2648e2caba5b9c"
+    }
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200:
+        return response.json()  # Assuming 'response.json()' contains injury reports
+    else:
+        return None
+
+
+# Define function to adjust for key player injuries
+def adjust_for_injuries(team_name, team_stats):
+    injuries = get_nba_injuries()  # Get injury reports using your function
+    if injuries:
+        for injury in injuries:
+            player_name = injury.get('Player', '')
+            player_team = injury.get('Team', '')
+            injury_status = injury.get('Status', '')
+
+            # Adjust team stats if a key player is injured
+            if player_team == team_name and injury_status == 'Out':
+                # Example of adjusting stats if star players are out
+                if player_name in ['LeBron James', 'Giannis Antetokounmpo', 'Kevin Durant']:  # Example of star players
+                    team_stats['ortg_max'] *= 0.8  # Decrease Offensive Rating by 20% if star player is out
+                    team_stats['drtg_max'] *= 0.9  # Slightly decrease Defensive Rating
+                    st.write(
+                        f"**Warning:** {player_name} is injured and will not be playing. This may affect {team_name}'s performance.")
+
+    return team_stats
+
+
+# Function to fetch and display player injuries for selected teams
+def display_injury_report(team_name):
+    injuries = get_nba_injuries()  # Get injury reports using your function
+    if injuries:
+        injured_players = []
+        for injury in injuries:
+            player_name = injury.get('Player', '')
+            player_team = injury.get('Team', '')
+            injury_status = injury.get('Status', '')
+
+            # Check if the player belongs to the selected team and is injured
+            if player_team == team_name and injury_status == 'Out':
+                injured_players.append(player_name)
+
+        if injured_players:
+            st.write(f"**Injured Players for {team_name}:**")
+            for player in injured_players:
+                st.write(f"- {player}")
+        else:
+            st.write(f"**No injuries reported for {team_name}.**")
+    else:
+        st.write("No injuries data available at the moment.")
 
 # Head-to-Head Predictor Section
 if app_mode == "Head-to-Head Predictor":
