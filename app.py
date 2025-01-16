@@ -5,6 +5,7 @@ from datetime import datetime
 import pandas as pd
 import pickle
 import requests
+import time
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 
@@ -60,15 +61,20 @@ st.markdown("""
         .footer {
             text-align: center;
             margin-top: 40px;
-            font-size: 1em;
+            font-size: 1.2em;
             color: #888;
+            font-family: 'Arial', sans-serif;
         }
     </style>
 """, unsafe_allow_html=True)
 
 # Sidebar for navigation
-app_mode = st.sidebar.radio("Select an option", ["Home", "Head-to-Head Predictor", "Parlay Creator", "NBA News"], key="app_mode_radio")
+app_mode = st.sidebar.radio("Select an option", ["Home", "Upcoming & Live Games", "NBA Standings", "Head-to-Head Predictor", "Parlay Creator", "NBA News"], key="app_mode_radio")
 
+# Fetch all NBA teams
+nba_teams = teams.get_teams()
+team_choices = {team['full_name']: team['id'] for team in nba_teams}
+team_choices = dict(sorted(team_choices.items()))
 
 # Main page
 def main_page():
@@ -94,34 +100,43 @@ def main_page():
     st.markdown("---")
     st.write("Developed by **Oulleys** | HoopsHub Analytics - All Rights Reserved")
 
-if app_mode == "Home":
-    main_page()  # Show the home page by default
-elif app_mode == "Head-to-Head Predictor":
-    # Call the function for Head-to-Head Predictor section
-    pass
-elif app_mode == "Parlay Creator":
-    # Call the function for Parlay Creator section
-    pass
-elif app_mode == "NBA News":
-    # Call the function for NBA News section
-    pass
 
-# Fetch all NBA teams
-nba_teams = teams.get_teams()
-team_choices = {team['full_name']: team['id'] for team in nba_teams}
-team_choices = dict(sorted(team_choices.items()))
+# Unified function to fetch both injury and news data
+def get_nba_data(data_type):
+    url = ""
+    if data_type == "injuries":
+        url = "https://api.sportsdata.io/v3/nba/scores/json/Injuries"
+    elif data_type == "news":
+        url = "https://api.sportsdata.io/v3/nba/scores/json/News"
 
-# Define function to get NBA injury reports
+    headers = {
+        "Ocp-Apim-Subscription-Key": "c00bcbe68d8345feaf2648e2caba5b9c"
+    }
+
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200:
+        return response.json()  # Returns the data based on the type (injury or news)
+    else:
+        return None
+
+# Fetch injury data
 def get_nba_injuries():
     url = "https://api.sportsdata.io/v3/nba/scores/json/Injuries"
     headers = {
         "Ocp-Apim-Subscription-Key": "c00bcbe68d8345feaf2648e2caba5b9c"
     }
     response = requests.get(url, headers=headers)
+    print(f"Status Code: {response.status_code}")  # Log the status code
     if response.status_code == 200:
-        return response.json()  # Assuming 'response.json()' contains injury reports
+        injury_data = response.json()  # Get the JSON data
+        print(injury_data)  # Log the actual injury data for inspection
+        return injury_data
     else:
-        return None
+        return None  # API error
+
+# Fetch news data
+def get_nba_news():
+    return get_nba_data("news")
 
 
 # Define function to adjust for key player injuries
@@ -134,14 +149,13 @@ def adjust_for_injuries(team_name, team_stats):
             injury_status = injury.get('Status', '')
 
             # Adjust team stats if a key player is injured
-            if player_team == team_name and injury_status == 'Out':
+            if player_team.lower() == team_name.lower() and injury_status.lower() == 'out':
                 # Example of adjusting stats if star players are out
                 if player_name in ['LeBron James', 'Giannis Antetokounmpo', 'Kevin Durant']:  # Example of star players
                     team_stats['ortg_max'] *= 0.8  # Decrease Offensive Rating by 20% if star player is out
                     team_stats['drtg_max'] *= 0.9  # Slightly decrease Defensive Rating
                     st.write(
                         f"**Warning:** {player_name} is injured and will not be playing. This may affect {team_name}'s performance.")
-
     return team_stats
 
 
@@ -151,13 +165,13 @@ def display_injury_report(team_name):
     if injuries:
         injured_players = []
         for injury in injuries:
-            player_name = injury.get('Player', '')
-            player_team = injury.get('Team', '')
-            injury_status = injury.get('Status', '')
+            player_name = injury.get('Player', 'Unknown Player')
+            player_team = injury.get('Team', 'Unknown Team')
+            injury_status = injury.get('Status', 'No status available')
 
-            # Check if the player belongs to the selected team and is injured
-            if player_team == team_name and injury_status == 'Out':
-                injured_players.append(player_name)
+            # Match the team name, ignoring case
+            if team_name.lower() in player_team.lower() and injury_status.lower() == 'out':
+                injured_players.append(f"{player_name} - {injury_status}")
 
         if injured_players:
             st.write(f"**Injured Players for {team_name}:**")
@@ -166,7 +180,7 @@ def display_injury_report(team_name):
         else:
             st.write(f"**No injuries reported for {team_name}.**")
     else:
-        st.write("No injuries data available at the moment.")
+        st.write(f"**No injury data available for {team_name} at the moment.**")
 
 # Head-to-Head Predictor Section
 if app_mode == "Head-to-Head Predictor":
@@ -194,7 +208,15 @@ if app_mode == "Head-to-Head Predictor":
     team_1_home_value = 1 if team_1_home == "Home" else 0
     team_2_home_value = 1 if team_2_home == "Home" else 0
 
-    if st.button("Fetch Head-to-Head Stats", key="fetch_button", help="Click to fetch stats and make predictions", use_container_width=True):
+    # Display injury report for both teams
+    st.subheader(f"Injury Report for {team_1_name}")
+    display_injury_report(team_1_name)
+
+    st.subheader(f"Injury Report for {team_2_name}")
+    display_injury_report(team_2_name)
+
+    if st.button("Fetch Head-to-Head Stats", key="fetch_button", help="Click to fetch stats and make predictions",
+                 use_container_width=True):
         team_1_id = team_choices[team_1_name]
         team_2_id = team_choices[team_2_name]
 
@@ -221,16 +243,22 @@ if app_mode == "Head-to-Head Predictor":
             'home': team_2_home_value
         }
 
+        # Adjust for injuries
+        team_1_avg_stats = adjust_for_injuries(team_1_name, team_1_avg_stats)
+        team_2_avg_stats = adjust_for_injuries(team_2_name, team_2_avg_stats)
+
         st.write(f"**Team 1 ({team_1_name}) Stats:**", team_1_avg_stats)
         st.write(f"**Team 2 ({team_2_name}) Stats:**", team_2_avg_stats)
 
         team_1_input = pd.DataFrame([[team_1_avg_stats['fg%'], team_1_avg_stats['3p%'], team_1_avg_stats['ft'],
                                       team_1_avg_stats['tov%'], team_1_avg_stats['ortg_max'],
-                                      team_1_avg_stats['drtg_max'], team_1_avg_stats['home']]], columns=['fg%', '3p%', 'ft', 'tov%', 'ortg_max', 'drtg_max', 'home'])
+                                      team_1_avg_stats['drtg_max'], team_1_avg_stats['home']]],
+                                    columns=['fg%', '3p%', 'ft', 'tov%', 'ortg_max', 'drtg_max', 'home'])
 
         team_2_input = pd.DataFrame([[team_2_avg_stats['fg%'], team_2_avg_stats['3p%'], team_2_avg_stats['ft'],
                                       team_2_avg_stats['tov%'], team_2_avg_stats['ortg_max'],
-                                      team_2_avg_stats['drtg_max'], team_2_avg_stats['home']]], columns=['fg%', '3p%', 'ft', 'tov%', 'ortg_max', 'drtg_max', 'home'])
+                                      team_2_avg_stats['drtg_max'], team_2_avg_stats['home']]],
+                                    columns=['fg%', '3p%', 'ft', 'tov%', 'ortg_max', 'drtg_max', 'home'])
 
         team_1_proba = model.predict_proba(team_1_input)[0][1]
         team_2_proba = model.predict_proba(team_2_input)[0][1]
@@ -344,32 +372,10 @@ elif app_mode == "Parlay Creator":
 elif app_mode == "NBA News":
     st.title("Latest NBA News and Injury Updates")
 
-    # Define function to get NBA news
-    def get_nba_news():
-        url = "https://api.sportsdata.io/v3/nba/scores/json/News"
-        headers = {
-            "Ocp-Apim-Subscription-Key": "c00bcbe68d8345feaf2648e2caba5b9c"  # Replace with your actual API key
-        }
-        response = requests.get(url, headers=headers)
-        if response.status_code == 200:
-            return response.json()  # Assuming 'response.json()' contains the news
-        else:
-            return None
+    if st.button("Refresh News"):
+        st.session_state['refresh_news_key'] = not st.session_state.get('refresh_news_key', False)
 
-    # Define function to get NBA injury reports
-    def get_nba_injuries():
-        url = "https://api.sportsdata.io/v3/nba/scores/json/Injuries"
-        headers = {
-            "Ocp-Apim-Subscription-Key": "c00bcbe68d8345feaf2648e2caba5b9c"  # Replace with your actual API key
-        }
-        response = requests.get(url, headers=headers)
-        if response.status_code == 200:
-            return response.json()  # Assuming 'response.json()' contains injury reports
-        else:
-            return None
-
-    # Fetch live NBA news
-    news_articles = get_nba_news()
+    news_articles = get_nba_data("news")
 
     if news_articles:
         st.subheader("Latest NBA News")
@@ -381,7 +387,7 @@ elif app_mode == "NBA News":
 
             # Convert the raw date string to a more readable format
             try:
-                date_obj = datetime.fromisoformat(date_str.replace('T', ' '))
+                date_obj = datetime.fromisoformat(date_str.replace('T', ' '))  # Parse ISO format date
                 formatted_date = date_obj.strftime("%B %d, %Y at %I:%M %p")  # e.g., January 14, 2025 at 12:00 AM
             except:
                 formatted_date = date_str
@@ -393,8 +399,7 @@ elif app_mode == "NBA News":
             st.markdown(f"*Published on: {formatted_date}*")
 
             # Display a shortened version of the content (if available)
-            summary = content[
-                      :250] + "..." if content != 'No content available.' else "Summary not provided for this article."
+            summary = content[:250] + "..." if content != 'No content available.' else "Summary not provided for this article."
             st.write(f"**Summary**: {summary}")  # Show the first 250 characters of the content
 
             # Display the "Read more" link as a styled button with a hover effect
@@ -404,3 +409,149 @@ elif app_mode == "NBA News":
             st.markdown("---")
     else:
         st.write("No news available at the moment.")
+
+#NBA Standings
+
+# Function to fetch NBA standings from SportsDataIO API
+def fetch_nba_standings(season, api_key):
+    url = f"https://api.sportsdata.io/v3/nba/scores/json/Standings/{season}"
+    headers = {"Ocp-Apim-Subscription-Key": api_key}
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200:
+        return response.json()
+    else:
+        st.error(f"Failed to fetch standings: {response.status_code}")
+        return None
+
+# Process the API response into a DataFrame
+def process_standings_data(data):
+    standings = []
+    for team in data:
+        standings.append({
+            "Conference": team["Conference"],
+            "Team": team["Name"],
+            "Wins": team["Wins"],
+            "Losses": team["Losses"],
+            "Win Percentage": f"{team['Percentage'] * 100:.2f}%",
+            "Division Rank": team["DivisionRank"]
+        })
+    return pd.DataFrame(standings)
+
+# Define NBA Standings feature
+def nba_standings():
+    st.title("🏀 NBA Standings")
+
+    current_year = datetime.now().year
+    season = st.selectbox("Select Season:", [str(current_year), "2024"])
+
+    api_key = "c00bcbe68d8345feaf2648e2caba5b9c"
+
+    # Add a refresh button to update the standings
+    if st.button("Refresh Standings"):
+        st.session_state['refresh_key'] = not st.session_state.get('refresh_key', False)
+
+    standings_data = fetch_nba_standings(season, api_key)
+    if standings_data:
+        standings_df = process_standings_data(standings_data)
+
+        # Split data by conference
+        st.subheader("Eastern Conference")
+        east_df = standings_df[standings_df["Conference"] == "Eastern"]
+        st.table(east_df)
+
+        st.subheader("Western Conference")
+        west_df = standings_df[standings_df["Conference"] == "Western"]
+        st.table(west_df)
+
+#Upcoming/Live games
+
+def fetch_games_by_date(date):
+    url = f"https://api.sportsdata.io/v3/nba/scores/json/GamesByDate/{date}"
+    headers = {"Ocp-Apim-Subscription-Key": "c00bcbe68d8345feaf2648e2caba5b9c"}
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200:
+        return response.json()
+    else:
+        st.error(f"Failed to fetch games: {response.status_code}")
+        return None
+
+# Function to process games data
+def process_games_data(games):
+    upcoming_games = []
+    live_games = []
+    for game in games:
+        game_time_raw = game.get('DateTime', '')
+        status = game.get('Status', '')
+        home_team = game.get('HomeTeam', 'Unknown')
+        away_team = game.get('AwayTeam', 'Unknown')
+
+        # Format the game time into a more readable format
+        try:
+            game_time = datetime.fromisoformat(game_time_raw).strftime('%I:%M %p')  # "07:00 PM"
+        except ValueError:
+            game_time = "TBD"
+
+        if status == 'InProgress':
+            live_games.append({
+                "Home Team": home_team,
+                "Away Team": away_team,
+                "Status": "Live",
+                "Score": f"{game.get('HomeTeamScore', 0)} - {game.get('AwayTeamScore', 0)}"
+            })
+        else:
+            upcoming_games.append({
+                "Home Team": home_team,
+                "Away Team": away_team,
+                "Status": "Scheduled",
+                "Time": game_time
+            })
+
+    return pd.DataFrame(upcoming_games), pd.DataFrame(live_games)
+
+
+#App modes
+
+if app_mode == "Home":
+    main_page()
+elif app_mode == "Head-to-Head Predictor":
+    # Call the function for Head-to-Head Predictor section
+    pass
+elif app_mode == "Parlay Creator":
+    # Call the function for Parlay Creator section
+    pass
+elif app_mode == "NBA News":
+    # Call the function for NBA News section
+    pass
+elif app_mode == "NBA Standings":
+    nba_standings()
+
+elif app_mode == "Upcoming & Live Games":
+    st.title("🏀 Upcoming Games and Live Games")
+
+    date = datetime.now().date()
+
+    # Fetch games automatically when the section is loaded
+    if "games_data" not in st.session_state:
+        games = fetch_games_by_date(date)
+        if games:
+            st.session_state['games_data'] = games
+
+    games = st.session_state.get('games_data', [])
+    if games:
+        upcoming_df, live_df = process_games_data(games)
+
+        # Display live games
+        if not live_df.empty:
+            st.subheader("🔴 Live Games")
+            st.dataframe(live_df)
+        else:
+            st.write("No live games at the moment.")
+
+        # Display upcoming games
+        if not upcoming_df.empty:
+            st.subheader("📅 Upcoming Games")
+            st.dataframe(upcoming_df)  # For an interactive table
+        else:
+            st.write("No upcoming games for the selected date.")
+    else:
+        st.write("Failed to load game data.")
