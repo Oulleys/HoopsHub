@@ -2,12 +2,21 @@ import streamlit as st
 from nba_api.stats.static import teams
 from nba_api.stats.endpoints import TeamGameLog
 from datetime import datetime
+from tzlocal import get_localzone
+from sklearn.ensemble import RandomForestClassifier
+
+import streamlit_authenticator as stauth
+import smtplib
+import random
+import sqlite3
+import bcrypt
 import pandas as pd
 import pickle
+import pytz
 import requests
 import time
 import numpy as np
-from sklearn.ensemble import RandomForestClassifier
+import re
 
 # Load the trained model
 model_path = './models/nba_model.pkl'
@@ -68,38 +77,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Sidebar for navigation
-app_mode = st.sidebar.radio("Select an option", ["Home", "Upcoming & Live Games", "NBA Standings", "Head-to-Head Predictor", "Parlay Creator", "NBA News"], key="app_mode_radio")
-
-# Fetch all NBA teams
-nba_teams = teams.get_teams()
-team_choices = {team['full_name']: team['id'] for team in nba_teams}
-team_choices = dict(sorted(team_choices.items()))
-
-# Main page
-def main_page():
-    st.title("Welcome to HoopsHub Analytics")
-
-    # App description
-    st.subheader("What HoopsHub Analytics Does")
-    st.write("""
-    **HoopsHub Analytics** is a dynamic sports analytics platform for NBA enthusiasts. 
-    The app provides several features including:
-
-    - **Head-to-Head Game Prediction**: Predict the outcome of games between selected NBA teams.
-    - **Parlay Creator**: Create your own parlays and calculate potential odds and payouts.
-    - **NBA News and Injury Updates**: Get the latest news and injury updates for NBA players.
-
-    Whether you're a fan, a bettor, or just someone looking to understand the game better, HoopsHub Analytics will help you gain insightful data-driven predictions.
-
-    **Please Note**: This app is still in progress and more features will be added soon! 
-    Your feedback is highly appreciated!
-    """)
-
-    # Add a footer message for users
-    st.markdown("---")
-    st.write("Developed by **Oulleys** | HoopsHub Analytics - All Rights Reserved")
-
+#Helper functions
 
 # Unified function to fetch both injury and news data
 def get_nba_data(data_type):
@@ -181,6 +159,283 @@ def display_injury_report(team_name):
             st.write(f"**No injuries reported for {team_name}.**")
     else:
         st.write(f"**No injury data available for {team_name} at the moment.**")
+
+
+# Example session state to track login status
+if "logged_in" not in st.session_state:
+    st.session_state["logged_in"] = False
+
+if "app_mode" not in st.session_state:
+    st.session_state["app_mode"] = "Home"
+
+
+
+# Sidebar for navigation
+app_mode = st.sidebar.radio(
+    "Select an option",
+    ["Home", "Sign up/Login", "Upcoming & Live Games", "NBA Standings", "Head-to-Head Predictor", "Parlay Creator", "NBA News"],
+    index=0,
+    key="app_mode_radio"
+)
+
+st.session_state["app_mode"] = app_mode
+
+# Initialize session state variables
+if "logged_in" not in st.session_state:
+    st.session_state["logged_in"] = False
+if "username" not in st.session_state:
+    st.session_state["username"] = None
+
+
+# Sidebar Log In and Log Out Buttons
+if st.sidebar.button("Log In", key="sidebar_login_button"):
+    st.experimental_set_query_params(app_mode="Sign up/Login")
+    st.sidebar.info("Redirecting to Sign Up/Login...")
+
+if st.sidebar.button("Log Out", key="sidebar_logout_button"):
+    st.session_state["logged_in"] = False
+    st.session_state["username"] = None
+    st.sidebar.info("Logged out successfully!")
+
+conn = sqlite3.connect("hoopshub_users.db") # Database setup
+c = conn.cursor()
+
+# Create tables if they don't exist
+c.execute("""
+CREATE TABLE IF NOT EXISTS users (
+    username TEXT PRIMARY KEY,
+    hashed_password TEXT,
+    email TEXT UNIQUE
+)
+""")
+conn.commit()
+
+c.execute("""
+CREATE TABLE IF NOT EXISTS bet_slips (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT,
+    bet_details TEXT,
+    result TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (username) REFERENCES users(username)
+)
+""")
+
+
+conn.commit()
+
+# Helper functions
+def hash_password(password):
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+def check_password(password, hashed):
+    return bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8"))
+
+def signup(username, password, email):
+    hashed_password = hash_password(password)
+    try:
+        c.execute("INSERT INTO users (username, hashed_password, email) VALUES (?, ?, ?)", (username, hashed_password, email))
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError as e:
+        if "UNIQUE constraint failed: users.email" in str(e):
+            return "email_exists"
+        return "username_exists"
+
+def login(username, password):
+    c.execute("SELECT hashed_password FROM users WHERE username = ?", (username,))
+    user = c.fetchone()
+    if user and check_password(password, user[0]):
+        return True
+    return False
+
+def save_parlay_bet(username, bet_details, amount, odds, payout):
+    c.execute("""
+    INSERT INTO bet_slips (username, bet_details, result, created_at)
+    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+    """, (username, f"{bet_details} | Bet: {amount} | Odds: {odds} | Payout: {payout}", "Pending"))
+    conn.commit()
+
+def fetch_user_bets(username):
+    c.execute("SELECT bet_details, result, created_at FROM bet_slips WHERE username = ?", (username,))
+    return c.fetchall()
+
+def is_valid_email(email):
+    allowed_domains = ["gmail.com", "outlook.com", "yahoo.com", "hotmail.com"]
+    email_regex = r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$'
+    if re.match(email_regex, email):
+        # Extract the domain from the email
+        domain = email.split("@")[-1]
+        return domain in allowed_domains
+    return False
+
+def is_strong_password(password):
+    # Regex for validating password
+    password_regex = r'^(?=.*[A-Za-z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$'
+    return re.match(password_regex, password) is not None
+
+
+def is_valid_username(username):
+    return re.match(r'^[A-Za-z0-9]{3,}$', username) is not None
+
+#Sign up/Login
+if app_mode == "Sign up/Login":
+    st.title("Sign Up or Log In")
+
+    # Check if the user is logged in
+    if "logged_in" not in st.session_state:
+        st.session_state["logged_in"] = False
+        st.session_state["username"] = None
+
+    if not st.session_state.logged_in:
+        choice = st.radio("Choose an option:", ["Login", "Sign Up"])
+
+        if choice == "Sign Up":
+            st.subheader("Create an Account")
+            username = st.text_input("Username")
+            email = st.text_input("Email")
+            password = st.text_input("Password", type="password")
+
+            if st.button("Sign Up"):
+                if not is_valid_username(username):
+                    st.error(
+                        "Invalid username. Must be at least 3 characters long and contain only letters and numbers.")
+                elif not is_valid_email(email):
+                    st.error("Invalid email address. Only Gmail, Outlook, Yahoo, and Hotmail are allowed.")
+                elif not is_strong_password(password):
+                    st.error(
+                        "Weak password. Must be at least 8 characters long, include a number, and a special character.")
+                else:
+                    result = signup(username, password, email)
+                    if result == True:
+                        st.success("Account created! Please log in.")
+                    elif result == "email_exists":
+                        st.error("Email already registered. Please use a different email.")
+                    elif result == "username_exists":
+                        st.error("Username already exists. Please choose a different username.")
+
+        elif choice == "Login":
+            st.subheader("Log In")
+            username = st.text_input("Username")
+            password = st.text_input("Password", type="password")
+            if st.button("Log In"):
+                if login(username, password):
+                    st.session_state.logged_in = True
+                    st.session_state.username = username
+                    st.success(f"Welcome, back {username}!")
+                else:
+                    st.error("Invalid username or password.")
+    else:
+        st.sidebar.write(f"Logged in as: **{st.session_state.username}**")
+
+    #Additional bet slip functionality if logged in
+    st.subheader("Your Bet Slips")
+    c.execute("SELECT bet_details, result, created_at FROM bet_slips WHERE username = ?",
+                  (st.session_state.username,))
+    bet_slips = c.fetchall()
+
+    if bet_slips:
+        for bet in bet_slips:
+                st.write(f"**Bet Details:** {bet[0]}")
+                st.write(f"**Result:** {bet[1] if bet[1] else 'Pending'}")
+                st.write(f"**Placed On:** {bet[2]}")
+                st.markdown("---")
+        else:
+            st.write("No bet slips found.")
+
+        # Add a new bet slip
+        st.subheader("Place a New Bet")
+        bet_details = st.text_area("Bet Details")
+        if st.button("Save Bet"):
+            c.execute("INSERT INTO bet_slips (username, bet_details, result) VALUES (?, ?, ?)",
+                      (st.session_state.username, bet_details, None))
+            conn.commit()
+            st.success("Bet slip saved!")
+
+# Fetch all NBA teams
+nba_teams = teams.get_teams()
+team_choices = {team['full_name']: team['id'] for team in nba_teams}
+team_choices = dict(sorted(team_choices.items()))
+
+#main page
+def main_page():
+    st.title("🏀 Welcome to HoopsHub Analytics")
+
+    # App description
+    st.subheader("Explore HoopsHub Analytics")
+    st.markdown("""
+    **HoopsHub Analytics** is your comprehensive platform for NBA analytics, delivering tools and insights for fans, bettors, and analysts. Here's what you can do:
+    """)
+
+    st.markdown("""
+    - **🏀 Upcoming & Live Games**: Check out upcoming games and stay updated with live game statistics.
+    - **📊 NBA Standings**: Monitor team standings and track playoff positions in real time.
+    - **💡 Head-to-Head Game Predictor**: Use analytics to predict the outcomes of games between NBA teams.
+    - **💰 Parlay Creator**: Build custom parlays, calculate odds, and project payouts for your bets.
+    - **📰 NBA News and Injury Updates**: Stay informed with the latest news, player injuries, and lineup changes.
+    """)
+
+    st.markdown("""
+    Whether you're here to enhance your betting strategy or gain a deeper understanding of the game, **HoopsHub Analytics** has you covered with data-driven insights and cutting-edge tools.
+    """)
+
+    st.markdown("---")
+
+    st.write("""
+    Developed by **Oulleys**  
+    © 2025 **HoopsHub Analytics** - All Rights Reserved  
+    *Bringing the game closer to you.*
+    """)
+
+    if st.button("📩 Contact Us"):
+        st.write("For feedback or inquiries, please reach out at: **vulidslol@gmail.com**")
+
+#Upcoming/Live games
+
+def fetch_games_by_date(date):
+    url = f"https://api.sportsdata.io/v3/nba/scores/json/GamesByDate/{date}"
+    headers = {"Ocp-Apim-Subscription-Key": "c00bcbe68d8345feaf2648e2caba5b9c"}
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200:
+        return response.json()
+    else:
+        st.error(f"Failed to fetch games: {response.status_code}")
+        return []
+
+# Function to process games data
+def process_games_data(games):
+    upcoming_games = []
+    live_games = []
+    for game in games:
+        game_time_raw = game.get('DateTime', '')
+        status = game.get('Status', '')
+        home_team = game.get('HomeTeam', 'Unknown')
+        away_team = game.get('AwayTeam', 'Unknown')
+
+        # Format the game time into a readable format
+        try:
+            game_time = datetime.fromisoformat(game_time_raw).strftime('%I:%M %p')  # "07:00 PM"
+        except ValueError:
+            game_time = "TBD"
+
+        # Check if the game is live or upcoming
+        if status in ['InProgress', '1st Quarter', '2nd Quarter', 'HalfTime', '3rd Quarter', '4th Quarter']:
+            live_games.append({
+                "Home Team": home_team,
+                "Away Team": away_team,
+                "Status": "Live",
+                "Score": f"{game.get('HomeTeamScore', 0)} - {game.get('AwayTeamScore', 0)}"
+            })
+        else:
+            upcoming_games.append({
+                "Home Team": home_team,
+                "Away Team": away_team,
+                "Status": "Scheduled",
+                "Time": game_time
+            })
+
+    return pd.DataFrame(upcoming_games), pd.DataFrame(live_games)
+
 
 # Head-to-Head Predictor Section
 if app_mode == "Head-to-Head Predictor":
@@ -360,6 +615,17 @@ elif app_mode == "Parlay Creator":
     def normalize_team_name(team_name):
         return team_name.strip().title()
 
+    # Fetch live games data for today's date
+    today = datetime.now().strftime("%Y-%m-%d")
+    games_data = fetch_games_by_date(today)
+    upcoming_games, live_games = process_games_data(games_data)
+
+    # Convert live games to a dictionary for quick lookup
+    live_scores_dict = {
+        f"{game['Home Team']} vs {game['Away Team']}": game["Score"]
+        for _, game in live_games.iterrows()
+    }
+
 
     @st.cache_data
     def fetch_odds_from_oddsapi():
@@ -373,7 +639,11 @@ elif app_mode == "Parlay Creator":
         }
         response = requests.get(url, params=params)
         if response.status_code == 200:
-            return response.json()
+            odds_data = response.json()
+            for game in odds_data:
+                game["start_time"] = game.get("commence_time", "N/A")  # Add start time
+                game["is_live"] = game.get("live", False)  # Add live status
+            return odds_data
         else:
             st.error(f"Failed to fetch odds: {response.status_code} - {response.json().get('message', '')}")
             return None
@@ -394,7 +664,9 @@ elif app_mode == "Parlay Creator":
                 "spread_away_odds": None,
                 "over_under": None,
                 "over_odds": None,
-                "under_odds": None
+                "under_odds": None,
+                "start_time": game.get("commence_time", "N/A"),  # Add start time
+                "is_live": game.get("live", False)  # Add live status
             }
             for bookmaker in game["bookmakers"]:
                 if bookmaker["key"] == "draftkings":  # Use DraftKings-specific odds
@@ -490,15 +762,19 @@ elif app_mode == "Parlay Creator":
     games = parse_odds_data(odds_data)
 
     if games:
-        st.markdown("### Upcoming Games")
+        st.markdown("### Upcoming Games with Live Scores")
         for game in games:
             with st.container():
                 st.markdown("---")
-                col_logo1, col_text, col_logo2 = st.columns([1, 4, 1])
+                col_logo1, col_text, col_logo2, col_status = st.columns([1, 4, 1, 2])
                 home_team = normalize_team_name(game["home_team"])
                 away_team = normalize_team_name(game["away_team"])
                 home_logo = team_logos.get(home_team, placeholder_logo)
                 away_logo = team_logos.get(away_team, placeholder_logo)
+
+                # Fetch the live score for the game, if available
+                game_key = f"{home_team} vs {away_team}"
+                live_score = live_scores_dict.get(game_key, "Not Started")
 
                 with col_logo1:
                     st.image(home_logo, width=50)
@@ -506,11 +782,12 @@ elif app_mode == "Parlay Creator":
                     st.markdown(f"### {home_team} vs {away_team}")
                 with col_logo2:
                     st.image(away_logo, width=50)
+                with col_status:
+                    start_time = game["start_time"]
+                    live_status = "Live Now" if game["is_live"] else f"Starts at {start_time}"
+                    st.markdown(f"🕒 **{live_status}**")
 
                 col1, col2, col3 = st.columns(3)
-
-                if "selected_team" not in st.session_state:
-                    st.session_state.selected_team = None
 
                 with col1:
                     st.markdown("**Moneyline**")
@@ -549,40 +826,82 @@ elif app_mode == "Parlay Creator":
                                      key=f"under_{game['game_id']}"):
                             add_bet_to_slip(f"{home_team} vs {away_team}", "Total", "Under", game["under_odds"])
 
+        # Professional Bet Slip with Consistent Grey Background
         st.sidebar.title("📝 Bet Slip")
-        bet_slip = st.session_state.bet_slip
-        if bet_slip:
+
+        bet_slip = st.session_state.get("bet_slip", [])
+        if bet_slip:  # Ensure bet_slip is not empty
             st.sidebar.markdown("### Your Bets")
             total_odds = []
-            for i, bet in enumerate(bet_slip):
-                st.sidebar.markdown(f"**{bet['Game']}**")
-                for j, sub_bet in enumerate(bet["Bets"]):
-                    st.sidebar.markdown(f"- **Type:** {sub_bet['Type']}")
-                    st.sidebar.markdown(f"- **Team/Pick:** {sub_bet['Team/Pick']}")
-                    st.sidebar.markdown(f"- **Odds:** {sub_bet['Odds']}")
-                    total_odds.append(sub_bet["Odds"])
 
-                    # Add a remove button for each individual bet
-                    if st.sidebar.button(f"Remove {sub_bet['Type']} {sub_bet['Team/Pick']}", key=f"remove_bet_{i}_{j}"):
-                        remove_bet_from_slip(bet["Game"], j)
-                        # Force a re-run of the script (which refreshes the UI)
+            # Iterate through games and their respective bets
+            for i, game_bets in enumerate(bet_slip):
+                st.sidebar.markdown(f"""
+                <div style="background-color: #333333; padding: 15px; border: 1px solid #444444; border-radius: 5px; margin-bottom: 15px;">
+                    <h4 style="margin: 0; color: #FFFFFF;">{game_bets['Game']}</h4>
+                """, unsafe_allow_html=True)
+
+                for j, sub_bet in enumerate(game_bets["Bets"]):
+                    st.sidebar.markdown(f"""
+                    <div style="margin: 10px 0;">
+                        <span style="color: #AAAAAA; font-size: 14px;"><b>Type:</b> {sub_bet['Type']}</span><br>
+                        <span style="color: #FFFFFF; font-size: 16px;"><b>Pick:</b> {sub_bet['Team/Pick']}</span><br>
+                        <span style="color: #AAAAAA; font-size: 14px;"><b>Odds:</b> {sub_bet['Odds']}</span>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                    if st.sidebar.button(f"❌ Remove ({sub_bet['Type']} - {sub_bet['Team/Pick']})",
+                                         key=f"remove_bet_{i}_{j}"):
+                        game_bets["Bets"].pop(j)
+                        if not game_bets["Bets"]:
+                            bet_slip.pop(i)
                         st.experimental_rerun()
-                        break  # Stop further code execution as we've already updated the state
 
-                if st.sidebar.button(f"Remove {bet['Game']}", key=f"remove_{i}"):
-                    st.session_state.bet_slip.pop(i)
-                    st.experimental_rerun()  # Force the UI to refresh
-                    break
+                if st.sidebar.button(f"🗑️ Remove All ({game_bets['Game']})", key=f"remove_all_{i}"):
+                    bet_slip.pop(i)
+                    st.experimental_rerun()
 
-            # Calculate corrected parlay odds and potential payout
-            parlay_odds = calculate_parlay_odds(total_odds)
-            stake_amount = st.sidebar.number_input("Enter your stake amount (in CAD):", value=10.0)
-            potential_payout = calculate_payout(parlay_odds, stake_amount)
+                st.sidebar.markdown("</div>", unsafe_allow_html=True)
 
-            st.sidebar.markdown(f"### Parlay Odds: **{parlay_odds:+}**")
-            st.sidebar.markdown(f"### Potential Payout: **${potential_payout} CAD**")
-        else:
-            st.sidebar.markdown("No bets added yet. Start selecting bets!")
+            total_odds = [sub_bet["Odds"] for game_bets in bet_slip for sub_bet in game_bets["Bets"]]
+            if total_odds:
+                parlay_odds = calculate_parlay_odds(total_odds)
+                stake_amount = st.sidebar.number_input("Enter your stake amount (in CAD):", value=10.0)
+                potential_payout = calculate_payout(parlay_odds, stake_amount)
+
+                st.sidebar.markdown(f"""
+                <div style="background-color: #444444; padding: 15px; border: 2px solid #28a745; border-radius: 5px; margin-top: 20px;">
+                    <h4 style="margin: 0 0 10px; color: #28a745;">Parlay Summary</h4>
+                    <span style="color: #AAAAAA; font-size: 16px;"><b>Total Odds:</b> <span style="color: #28a745;">{parlay_odds:+}</span></span><br>
+                    <span style="color: #AAAAAA; font-size: 16px;"><b>Stake:</b> ${stake_amount:.2f} CAD</span><br>
+                    <span style="color: #FFFFFF; font-size: 18px; font-weight: bold;"><b>Potential Payout:</b> ${potential_payout:.2f} CAD</span>
+                </div>
+                """, unsafe_allow_html=True)
+
+                if st.sidebar.button("Place Bet", key="place_bet"):
+                    if st.session_state.get("logged_in", False):
+                        # Proceed with bet placement logic
+                        try:
+                            response = requests.post(
+                                "https://your-backend-url.com/place-bet",
+                                json={"bets": bet_slip, "stake": stake_amount, "user_id": st.session_state["user_id"]},
+                            )
+                            if response.status_code == 200:
+                                st.sidebar.success("Bet placed successfully!")
+                                st.session_state.bet_slip = []
+                                st.experimental_rerun()
+                            else:
+                                st.sidebar.error(f"Error: {response.json().get('message', 'Unknown error')}")
+                        except Exception as e:
+                            st.sidebar.error(f"Error: {str(e)}")
+                    else:
+                        st.sidebar.warning("You must log in to place a bet.")
+            else:
+                st.sidebar.markdown("""
+                <div style="background-color: #333333; padding: 15px; border: 1px solid #444444; border-radius: 5px; text-align: center;">
+                    <span style="font-size: 14px; color: #AAAAAA;">No bets added yet.<br>Start selecting bets!</span>
+                </div>
+                """, unsafe_allow_html=True)
 
 # NBA News Section
 elif app_mode == "NBA News":
@@ -628,7 +947,6 @@ elif app_mode == "NBA News":
 
 #NBA Standings
 
-# Function to fetch NBA standings from SportsDataIO API
 def fetch_nba_standings(season, api_key):
     url = f"https://api.sportsdata.io/v3/nba/scores/json/Standings/{season}"
     headers = {"Ocp-Apim-Subscription-Key": api_key}
@@ -689,7 +1007,7 @@ def fetch_games_by_date(date):
         return response.json()
     else:
         st.error(f"Failed to fetch games: {response.status_code}")
-        return None
+        return []
 
 # Function to process games data
 def process_games_data(games):
@@ -744,6 +1062,9 @@ elif app_mode == "Upcoming & Live Games":
     st.title("🏀 Upcoming Games and Live Games")
 
     date = datetime.now().date()
+
+    if st.button("🔄 Refresh"):
+        st.session_state.pop('games_data', None)  # Reload the app to fetch new data
 
     # Fetch games automatically when the section is loaded
     if "games_data" not in st.session_state:
