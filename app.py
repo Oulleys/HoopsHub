@@ -756,6 +756,15 @@ elif app_mode == "Parlay Creator":
                 return
 
 
+    def format_start_time(iso_time):
+        try:
+            # Parse ISO format time and convert to a readable format
+            game_time = datetime.fromisoformat(iso_time.replace('Z', '')).strftime("%B %d, %Y, %I:%M %p")
+            return game_time
+        except Exception as e:
+            return "Time Unavailable"  # Handle invalid time formats
+
+
     odds_data = fetch_odds_from_oddsapi()
     if not odds_data:
         st.error("No games available.")
@@ -786,7 +795,11 @@ elif app_mode == "Parlay Creator":
                     st.image(away_logo, width=50)
                 with col_status:
                     start_time = game["start_time"]
-                    live_status = "Live Now" if game["is_live"] else f"Starts at {start_time}"
+                    live_status = (
+                        "Live Now"
+                        if game["is_live"]
+                        else f"Starts at {format_start_time(game['start_time'])}"
+                    )
                     st.markdown(f"🕒 **{live_status}**")
 
                 col1, col2, col3 = st.columns(3)
