@@ -18,6 +18,8 @@ import time
 import numpy as np
 import re
 
+#:)
+
 # Load the trained model
 model_path = './models/nba_model.pkl'
 with open(model_path, 'rb') as f:
@@ -189,7 +191,7 @@ if "username" not in st.session_state:
 
 # Sidebar Log In and Log Out Buttons
 if st.sidebar.button("Log In", key="sidebar_login_button"):
-    st.experimental_set_query_params(app_mode="Sign up/Login")
+    st.query_params(app_mode="Sign up/Login")
     st.sidebar.info("Redirecting to Sign Up/Login...")
 
 if st.sidebar.button("Log Out", key="sidebar_logout_button"):
