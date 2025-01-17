@@ -33,6 +33,12 @@ if 'head_to_head_teams' not in st.session_state:
 if 'parlay_teams' not in st.session_state:
     st.session_state['parlay_teams'] = {'team_1': None, 'team_2': None}
 
+if "logged_in" not in st.session_state:
+    st.session_state["logged_in"] = False
+
+if "app_mode" not in st.session_state:
+    st.session_state["app_mode"] = "Home"
+
 # Add custom CSS for styling
 st.markdown("""
     <style>
@@ -160,16 +166,6 @@ def display_injury_report(team_name):
     else:
         st.write(f"**No injury data available for {team_name} at the moment.**")
 
-
-# Example session state to track login status
-if "logged_in" not in st.session_state:
-    st.session_state["logged_in"] = False
-
-if "app_mode" not in st.session_state:
-    st.session_state["app_mode"] = "Home"
-
-
-
 # Sidebar for navigation
 app_mode = st.sidebar.radio(
     "Select an option",
@@ -177,6 +173,12 @@ app_mode = st.sidebar.radio(
     index=0,
     key="app_mode_radio"
 )
+
+# Persistent display of logged-in user
+if st.session_state.get("logged_in", False):
+    st.sidebar.markdown(f"---\nLogged in as: **{st.session_state.get('username', 'Guest')}**")
+else:
+    st.sidebar.markdown("---\nYou are not logged in.")
 
 st.session_state["app_mode"] = app_mode
 
